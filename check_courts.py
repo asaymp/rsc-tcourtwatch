@@ -36,7 +36,7 @@ def main():
     if new_courts:
         message = "New court(s) opened up:\n" + "\n".join(new_courts)
         requests.post(
-            f"https://ntfy.sh{NTFY_TOPIC}",
+            f"https://ntfy.sh/{NTFY_TOPIC}",
             data=message.encode("utf-8"),
             headers={
                 "Title": "Tennis Court Alert!",
