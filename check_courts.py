@@ -9,7 +9,9 @@ STATE_FILE = "seen_courts.json"
 def load_seen_courts():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
-            return json.load(f)
+            content = f.read().strip()
+            if content:
+                return json.loads(content)
     return []
 
 def save_seen_courts(courts):
