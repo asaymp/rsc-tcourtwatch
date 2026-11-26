@@ -1,0 +1,40 @@
+name: Tennis Court Monitor
+
+on:
+  # Allows you to run it manually from the Actions tab to test it
+  workflow_dispatch:
+  # Runs every 5 minutes
+  schedule:
+    - cron: '*/5 * * * *'
+
+# Gives the script permission to update the seen_courts.json memory file
+permissions:
+  contents: write
+
+jobs:
+  check-courts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run court checker script
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python check_courts.py
+
+      - name: Save memory file (prevent duplicate alerts)
+        run: |
+          git config --global user.name "Court Bot"
+          git config --global user.email "bot@://github.com"
+          git add seen_courts.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update seen courts" && git push)
