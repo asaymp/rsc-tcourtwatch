@@ -80,6 +80,10 @@ def parse_grid_html(html, target_dt, now_ottawa):
     win_end = time_to_minutes(win_end_str)
 
     soup = BeautifulSoup(html, "html.parser")
+    print("Initial GET status:", resp.status_code, "| URL:", resp.url, "| Form found:", bool(soup.find("form")))
+    if not soup.find("form"):
+        print("Initial page text:", soup.get_text(" ", strip=True)[:200])
+
     all_tds = soup.find_all("td", id=re.compile(r"^court_\d+_row_\d{2}:\d{2}$"))
     drag_tds = [td for td in all_tds if "start_drag" in td.get("onmousedown", "")]
     print(f"  [{day_label}] cells={len(all_tds)}, open_slots={len(drag_tds)}")
