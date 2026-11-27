@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 
-# Secrets from GitHub Actions
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 CLUB_EMAIL = os.environ.get("CLUB_EMAIL")
 CLUB_PASSWORD = os.environ.get("CLUB_PASSWORD")
@@ -27,7 +26,6 @@ COURTS = {
 }
 
 # Target hours by weekday (0=Mon ... 4=Fri, 5=Sat, 6=Sun)
-# Note: Start times are 30-min blocks; e.g., 21:30 ends at 22:00 (10pm)
 SCHEDULE_WINDOWS = {
     4: ("17:00", "21:30"),  # Friday 5pm - 10pm
     5: ("08:00", "21:30"),  # Saturday 8am - 10pm
@@ -67,13 +65,11 @@ def login(session):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": f"{BASE_URL}/",
     }
-    # 1. Load login page to grab login_token
     resp = session.get(f"{BASE_URL}/", headers=headers)
     soup = BeautifulSoup(resp.text, "html.parser")
     token_input = soup.find("input", {"name": "login_token"})
     login_token = token_input["value"] if token_input else ""
 
-    # 2. Submit login credentials
     payload = {
         "email": CLUB_EMAIL,
         "password": CLUB_PASSWORD,
@@ -98,17 +94,25 @@ def fetch_day_slots(session, target_dt, now_ottawa):
     win_start = time_to_minutes(win_start_str)
     win_end = time_to_minutes(win_end_str)
 
-    # First initialize the reserve-for-member session state for this date
-    session.get(
+    # Load the member reservation page first to initialize session cookies/state
+    init_resp = session.get(
         f"{BASE_URL}/tennis/reserve-for-member",
         params={"date": date_str, "locations": "1", "ajax": "true"},
-        headers={"User-Agent": "Mozilla/5.0", "X-Requested-With": "XMLHttpRequest"},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": f"{BASE_URL}/member",
+        },
     )
 
-    # Fetch the interactive booking grid
+    # Extract dynamic season value from the form if available
+    init_soup = BeautifulSoup(init_resp.text, "html.parser")
+    season_input = init_soup.find("input", {"name": "season"})
+    season_val = season_input["value"] if season_input else "123"
+
     payload = {
         "multiselectdata": "",
-        "season": "123",
+        "season": season_val,
         "schedule_id": "",
         "courts_confirmed": "0",
         "event_type": "",
@@ -145,35 +149,34 @@ def fetch_day_slots(session, target_dt, now_ottawa):
         f"{BASE_URL}/resource/court-schedule?ajax=true",
         data=payload,
         headers={
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "X-Requested-With": "XMLHttpRequest",
             "Referer": f"{BASE_URL}/tennis/reserve-for-member",
         },
     )
 
     soup = BeautifulSoup(resp.text, "html.parser")
+    all_tds = soup.find_all("td", id=re.compile(r"^court_\d+_row_\d{2}:\d{2}$"))
+    drag_tds = [td for td in all_tds if "start_drag" in td.get("onmousedown", "")]
+    print(f"[{day_label}] HTML length={len(resp.text)}, total cells={len(all_tds)}, bookable cells={len(drag_tds)}")
 
-    # Collect all open 30-min slots: {start_minutes: [court_id, ...]}
     open_by_time = {}
     now_minutes = now_ottawa.hour * 60 + now_ottawa.minute
     is_today = target_dt.date() == now_ottawa.date()
 
-    for td in soup.find_all("td", id=re.compile(r"^court_\d+_row_\d{2}:\d{2}$")):
-        # Only cells with start_drag in onmousedown are bookable
-        if "start_drag" not in td.get("onmousedown", ""):
-            continue
-
+    for td in drag_tds:
         match = re.match(r"^court_(\d+)_row_(\d{2}:\d{2})$", td["id"])
         if not match:
             continue
 
         court_id, time_str = match.groups()
+        court_name = COURTS.get(court_id, f"Excluded Court ({court_id})")
+        print(f"   Open 30-min slot: {court_name} at {time_str}")
+
         if court_id not in COURTS:
             continue
 
         slot_mins = time_to_minutes(time_str)
-
-        # Filter to desired time window & ignore slots already in the past today
         if slot_mins < win_start or slot_mins > win_end:
             continue
         if is_today and slot_mins <= now_minutes:
@@ -182,9 +185,9 @@ def fetch_day_slots(session, target_dt, now_ottawa):
         open_by_time.setdefault(slot_mins, []).append(court_id)
 
     found_options = []
-    used_in_same_court = set()  # (slot_mins, court_id)
+    used_in_same_court = set()
 
-    # 1. Check for 1 full hour (two consecutive 30-min slots) on the SAME court
+    # 1. Full 1 hour on the SAME court
     for t in sorted(open_by_time.keys()):
         t_next = t + 30
         if t_next in open_by_time:
@@ -195,7 +198,7 @@ def fetch_day_slots(session, target_dt, now_ottawa):
                     used_in_same_court.add((t, cid))
                     used_in_same_court.add((t_next, cid))
 
-    # 2. Check for adjacent 30-min slots on DIFFERENT courts (split-court 1 hour)
+    # 2. Adjacent 30-min slots on DIFFERENT courts
     for t in sorted(open_by_time.keys()):
         t_next = t + 30
         if t_next in open_by_time:
@@ -222,7 +225,6 @@ def main():
     login(session)
 
     all_available = []
-    # Check 0, 1, and 2 days out
     for offset in range(3):
         target_dt = now_ottawa + timedelta(days=offset)
         day_matches = fetch_day_slots(session, target_dt, now_ottawa)
@@ -251,11 +253,6 @@ def main():
         print("No new court openings since last check.")
 
     save_seen_courts(all_available)
-
-
-if __name__ == "__main__":
-    main()
-
 
 
 if __name__ == "__main__":
