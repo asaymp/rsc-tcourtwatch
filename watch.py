@@ -82,6 +82,10 @@ def parse_grid_html(html, target_dt, now_ottawa):
     soup = BeautifulSoup(html, "html.parser")
     all_tds = soup.find_all("td", id=re.compile(r"^court_\d+_row_\d{2}:\d{2}$"))
     drag_tds = [td for td in all_tds if "start_drag" in td.get("onmousedown", "")]
+    print(f"  [{day_label}] cells={len(all_tds)}, open_slots={len(drag_tds)}")
+    for td in drag_tds:
+        print(f"     -> {td['id']}")
+
 
     open_by_time = {}
     now_minutes = now_ottawa.hour * 60 + now_ottawa.minute
