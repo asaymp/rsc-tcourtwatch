@@ -177,37 +177,28 @@ def run_check():
     all_available = []
     for target_dt in target_days:
         date_str = target_dt.strftime("%m/%d/%Y")
+        # Must include ajax=true so Club Automation initializes the member booking session
         init_resp = s.get(
             f"{BASE_URL}/tennis/reserve-for-member",
             params={"date": date_str, "locations": "1", "ajax": "true"},
-            headers={"X-Requested-With": "XMLHttpRequest"},
+            headers={"X-Requested-With": "XMLHttpRequest", "Referer": f"{BASE_URL}/member"},
             timeout=20,
         )
         init_soup = BeautifulSoup(init_resp.text, "html.parser")
-        season_input = init_soup.find("input", {"name": "season"})
-        season_val = season_input["value"] if season_input else "123"
 
-        payload = {
-            "multiselectdata": "",
-            "season": season_val,
-            "schedule_id": "",
-            "courts_confirmed": "0",
-            "event_type": "",
-            "component_id": "2",
-            "event_id": "",
-            "player": "",
+        # Automatically grab all form fields from #courtScheduleProperties
+        payload = {}
+        form = init_soup.find("form", {"id": "courtScheduleProperties"})
+        if form:
+            for inp in form.find_all("input"):
+                name = inp.get("name")
+                if name:
+                    payload[name] = inp.get("value", "")
+
+        # Override with the exact booking search values
+        payload.update({
             "players_string": PLAYER_ID,
-            "player_ghost_string": "",
-            "save": "0",
-            "cancel": "0",
-            "id": "",
-            "time_begin": "",
-            "time_end": "",
-            "resource_id": "",
-            "time_changed": "0",
             "reserve_for": "member-court",
-            "guest_bill_to_members": "0",
-            "guest_fee_to_members": "0",
             f"p_type_{PLAYER_ID}": "$",
             f"percent_{PLAYER_ID}": "",
             f"guest_bill_to_members[{PLAYER_ID}]": "0",
@@ -220,14 +211,16 @@ def run_check():
             "end_date": date_str,
             "locations": "1",
             "types": "all",
-        }
+        })
+
         grid_resp = s.post(
             f"{BASE_URL}/resource/court-schedule?ajax=true",
             data=payload,
-            headers={"X-Requested-With": "XMLHttpRequest", "Referer": f"{BASE_URL}/tennis/reserve-for-member"},
+            headers={"X-Requested-With": "XMLHttpRequest", "Referer": f"{BASE_URL}/member"},
             timeout=20,
         )
         all_available.extend(parse_grid_html(grid_resp.text, target_dt, now_ottawa))
+
 
     seen_courts = load_seen_courts()
     new_courts = [c for c in all_available if c not in seen_courts]
