@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth_sync
 
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 CLUB_EMAIL = os.environ.get("CLUB_EMAIL")
