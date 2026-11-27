@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 CLUB_EMAIL = os.environ.get("CLUB_EMAIL")
@@ -12,7 +13,6 @@ CLUB_PASSWORD = os.environ.get("CLUB_PASSWORD")
 
 STATE_FILE = "seen_courts.json"
 BASE_URL = "https://clubautomation.com"
-PLAYER_ID = "58236"
 
 # Doubles courts only (Court 5 / ID "232" is excluded)
 COURTS = {
@@ -60,108 +60,17 @@ def minutes_to_12h(mins):
     return f"{h12}:{m:02d}{ampm}"
 
 
-def login(session):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": f"{BASE_URL}/",
-    }
-    resp = session.get(f"{BASE_URL}/", headers=headers)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    token_input = soup.find("input", {"name": "login_token"})
-    login_token = token_input["value"] if token_input else ""
-
-    payload = {
-        "email": CLUB_EMAIL,
-        "password": CLUB_PASSWORD,
-        "login_token": login_token,
-    }
-    login_resp = session.post(f"{BASE_URL}/login/login", data=payload, headers=headers)
-
-    if "Invalid" in login_resp.text or "Login to your account" in login_resp.text:
-        raise RuntimeError("Login failed! Double-check CLUB_EMAIL and CLUB_PASSWORD secrets.")
-    print("Logged into Rideau Sports Centre successfully.")
-
-
-def fetch_day_slots(session, target_dt, now_ottawa):
-    date_str = target_dt.strftime("%m/%d/%Y")
+def parse_grid_html(html, target_dt, now_ottawa):
     day_label = target_dt.strftime("%a %b %d")
     weekday = target_dt.weekday()
-
-    if weekday not in SCHEDULE_WINDOWS:
-        return []
-
     win_start_str, win_end_str = SCHEDULE_WINDOWS[weekday]
     win_start = time_to_minutes(win_start_str)
     win_end = time_to_minutes(win_end_str)
 
-    # Load the member reservation page first to initialize session cookies/state
-    init_resp = session.get(
-        f"{BASE_URL}/tennis/reserve-for-member",
-        params={"date": date_str, "locations": "1", "ajax": "true"},
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "X-Requested-With": "XMLHttpRequest",
-            "Referer": f"{BASE_URL}/member",
-        },
-    )
-
-    # Extract dynamic season value from the form if available
-    init_soup = BeautifulSoup(init_resp.text, "html.parser")
-    season_input = init_soup.find("input", {"name": "season"})
-    season_val = season_input["value"] if season_input else "123"
-
-    payload = {
-        "multiselectdata": "",
-        "season": season_val,
-        "schedule_id": "",
-        "courts_confirmed": "0",
-        "event_type": "",
-        "component_id": "2",
-        "event_id": "",
-        "player": "",
-        "players_string": PLAYER_ID,
-        "player_ghost_string": "",
-        "save": "0",
-        "cancel": "0",
-        "id": "",
-        "time_begin": "",
-        "time_end": "",
-        "resource_id": "",
-        "time_changed": "0",
-        "reserve_for": "member-court",
-        "guest_bill_to_members": "0",
-        "guest_fee_to_members": "0",
-        f"p_type_{PLAYER_ID}": "$",
-        f"percent_{PLAYER_ID}": "",
-        f"guest_bill_to_members[{PLAYER_ID}]": "0",
-        f"guest_fee_to_members[{PLAYER_ID}]": "0",
-        "rcUserName": "Add another Player",
-        "rcUserPriceType": "$",
-        "rcUserPrice": "-default-",
-        "rcUserIsGuest": "1",
-        "date": date_str,
-        "end_date": date_str,
-        "locations": "1",
-        "types": "all",
-    }
-
-    resp = session.post(
-        f"{BASE_URL}/resource/court-schedule?ajax=true",
-        data=payload,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "X-Requested-With": "XMLHttpRequest",
-            "Referer": f"{BASE_URL}/tennis/reserve-for-member",
-        },
-    )
-
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     all_tds = soup.find_all("td", id=re.compile(r"^court_\d+_row_\d{2}:\d{2}$"))
     drag_tds = [td for td in all_tds if "start_drag" in td.get("onmousedown", "")]
-    print(f"[{day_label}] HTML length={len(resp.text)}, total cells={len(all_tds)}, bookable cells={len(drag_tds)}")
-    title = soup.title.string.strip() if soup.title and soup.title.string else "No title"
-    print(f"   Page title: {title} | Snippet: {soup.get_text(' ', strip=True)[:180]}")
-
+    print(f"[{day_label}] total cells={len(all_tds)}, bookable cells={len(drag_tds)}")
 
     open_by_time = {}
     now_minutes = now_ottawa.hour * 60 + now_ottawa.minute
@@ -173,9 +82,6 @@ def fetch_day_slots(session, target_dt, now_ottawa):
             continue
 
         court_id, time_str = match.groups()
-        court_name = COURTS.get(court_id, f"Excluded Court ({court_id})")
-        print(f"   Open 30-min slot: {court_name} at {time_str}")
-
         if court_id not in COURTS:
             continue
 
@@ -224,14 +130,64 @@ def main():
     ottawa_tz = ZoneInfo("America/Toronto")
     now_ottawa = datetime.now(ottawa_tz)
 
-    session = requests.Session()
-    login(session)
+    # Only launch browser if at least one of the next 3 days is Fri, Sat, or Sun
+    target_days = [
+        now_ottawa + timedelta(days=offset)
+        for offset in range(3)
+        if (now_ottawa + timedelta(days=offset)).weekday() in SCHEDULE_WINDOWS
+    ]
+
+    if not target_days:
+        print("None of the next 3 days are Fri/Sat/Sun. Skipping check.")
+        return
 
     all_available = []
-    for offset in range(3):
-        target_dt = now_ottawa + timedelta(days=offset)
-        day_matches = fetch_day_slots(session, target_dt, now_ottawa)
-        all_available.extend(day_matches)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
+
+        # 1. Open login page and wait past any Vercel security checkpoint
+        page.goto(f"{BASE_URL}/", wait_until="networkidle")
+        page.wait_for_selector("input[name='email']", timeout=20000)
+
+        # 2. Log in
+        page.fill("input[name='email']", CLUB_EMAIL)
+        page.fill("input[name='password']", CLUB_PASSWORD)
+        page.click("button[type='submit'], input[type='submit']")
+        page.wait_for_load_state("networkidle")
+        print("Logged into Rideau Sports Centre via browser.")
+
+        # 3. Open Reserve a Court page
+        page.goto(f"{BASE_URL}/tennis/reserve-for-member", wait_until="networkidle")
+
+        for target_dt in target_days:
+            date_str = target_dt.strftime("%m/%d/%Y")
+            # Trigger Club Automation's internal AJAX grid load for this exact date
+            html = page.evaluate(
+                """async (dateStr) => {
+                    const form = document.querySelector('#courtScheduleProperties');
+                    const formData = new URLSearchParams(new FormData(form));
+                    formData.set('date', dateStr);
+                    formData.set('end_date', dateStr);
+                    formData.set('locations', '1');
+                    formData.set('types', 'all');
+                    const resp = await fetch('/resource/court-schedule?ajax=true', {
+                        method: 'POST',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                        body: formData
+                    });
+                    return await resp.text();
+                }""",
+                date_str,
+            )
+            day_matches = parse_grid_html(html, target_dt, now_ottawa)
+            all_available.extend(day_matches)
+
+        browser.close()
 
     print(f"Total matching 1-hr options found: {len(all_available)}")
     for opt in all_available:
