@@ -132,7 +132,12 @@ def try_cffi_fetch(target_days, now_ottawa):
     print("Attempting TLS-impersonated session via proxy (curl_cffi)...")
     proxies = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
     s = cffi_requests.Session(impersonate="chrome", proxies=proxies)
-    resp = s.get(f"{BASE_URL}/")
+    try:
+        resp = s.get(f"{BASE_URL}/", timeout=12)
+    except Exception as e:
+        print(f"cffi proxy connection failed ({e}), trying Playwright...")
+    return None
+
     print(f"cffi GET / -> status={resp.status_code}, url={resp.url}, len={len(resp.text)}")
 
     if "Vercel Security Checkpoint" in resp.text or "://clubautomation.com" in str(resp.url) or resp.status_code == 429:
