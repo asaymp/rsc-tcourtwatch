@@ -23,7 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4 playwright playwright-stealth
+          pip install requests beautifulsoup4 playwright curl_cffi
           playwright install chromium
 
       - name: Run court checker script
