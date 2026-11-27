@@ -155,7 +155,7 @@ def main():
         page = context.new_page()
 
         # 1. Open login page and wait past any Vercel security checkpoint
-        page.goto(f"{BASE_URL}/", wait_until="domcontentloaded")
+        page.goto(f"{BASE_URL}/member", wait_until="domcontentloaded")
         try:
             email_box = page.locator("input[name='email'], input[id='email'], input[type='text']").first
             email_box.wait_for(state="visible", timeout=25000)
