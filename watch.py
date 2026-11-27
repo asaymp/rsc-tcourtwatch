@@ -161,18 +161,44 @@ def run_check():
     s = cffi_requests.Session(impersonate="chrome")
     resp = s.get(f"{BASE_URL}/", timeout=20)
     soup = BeautifulSoup(resp.text, "html.parser")
-    token_input = soup.find("input", {"name": "login_token"})
-    login_token = token_input["value"] if token_input else ""
 
+    # Find the actual login form on the page and grab all hidden fields + action URL
+    login_form = soup.find("form")
+    login_action = f"{BASE_URL}/login/login"
+    login_data = {}
+    if login_form:
+        if login_form.get("action"):
+            act = login_form["action"]
+            login_action = act if act.startswith("http") else f"{BASE_URL}{act if act.startswith('/') else '/' + act}"
+        for inp in login_form.find_all("input"):
+            name = inp.get("name")
+            if name:
+                login_data[name] = inp.get("value", "")
+
+    # Populate username/email & password into whichever field names the form expects
+    for key in list(login_data.keys()):
+        if "user" in key.lower() or "email" in key.lower() or "login" == key.lower():
+            login_data[key] = CLUB_EMAIL
+        elif "pass" in key.lower():
+            login_data[key] = CLUB_PASSWORD
+    if not any("pass" in k.lower() for k in login_data):
+        login_data["email"] = CLUB_EMAIL
+        login_data["password"] = CLUB_PASSWORD
+
+    print("Submitting login to:", login_action, "| Fields:", list(login_data.keys()))
     login_resp = s.post(
-        f"{BASE_URL}/login/login",
-        data={"email": CLUB_EMAIL, "password": CLUB_PASSWORD, "login_token": login_token},
+        login_action,
+        data=login_data,
         headers={"Referer": f"{BASE_URL}/"},
         timeout=20,
     )
-    if "Login to your account" in login_resp.text:
+    print("Login status:", login_resp.status_code, "| Landed URL:", login_resp.url)
+    print("Login snippet:", BeautifulSoup(login_resp.text, "html.parser").get_text(" ", strip=True)[:150])
+
+    if "Login to your account" in login_resp.text or "Invalid" in login_resp.text:
         print(f"[{stamp}] ERROR: Login failed! Check .env credentials.")
         return
+
     
     print("Login status:", login_resp.status_code, "| Landed URL:", login_resp.url)
     print("Login snippet:", BeautifulSoup(login_resp.text, "html.parser").get_text(" ", strip=True)[:150])
