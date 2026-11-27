@@ -1,6 +1,7 @@
 import os
 import re
 import json
+from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import requests
@@ -11,6 +12,7 @@ from playwright.sync_api import sync_playwright
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 CLUB_EMAIL = os.environ.get("CLUB_EMAIL")
 CLUB_PASSWORD = os.environ.get("CLUB_PASSWORD")
+PROXY_URL = os.environ.get("PROXY_URL")
 
 STATE_FILE = "seen_courts.json"
 BASE_URL = "https://clubautomation.com"
@@ -127,12 +129,13 @@ def parse_grid_html(html, target_dt, now_ottawa):
 
     return found_options
 def try_cffi_fetch(target_days, now_ottawa):
-    print("Attempting TLS-impersonated session (curl_cffi)...")
-    s = cffi_requests.Session(impersonate="chrome")
+    print("Attempting TLS-impersonated session via proxy (curl_cffi)...")
+    proxies = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
+    s = cffi_requests.Session(impersonate="chrome", proxies=proxies)
     resp = s.get(f"{BASE_URL}/")
     print(f"cffi GET / -> status={resp.status_code}, url={resp.url}, len={len(resp.text)}")
 
-    if "Vercel Security Checkpoint" in resp.text or "://clubautomation.com" in str(resp.url):
+    if "Vercel Security Checkpoint" in resp.text or "://clubautomation.com" in str(resp.url) or resp.status_code == 429:
         print("cffi hit Vercel checkpoint/redirect.")
         return None
 
@@ -201,11 +204,21 @@ def try_cffi_fetch(target_days, now_ottawa):
 
 
 def try_playwright_fetch(target_days, now_ottawa):
-    print("Attempting Playwright with native Linux/en-CA fingerprint...")
+    print("Attempting Playwright via proxy...")
     results = []
+    proxy_config = None
+    if PROXY_URL:
+        parsed = urlparse(PROXY_URL)
+        proxy_config = {
+            "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}",
+            "username": parsed.username,
+            "password": parsed.password,
+        }
+
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
+            proxy=proxy_config,
             args=[
                 "--headless=new",
                 "--disable-blink-features=AutomationControlled",
@@ -304,3 +317,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
