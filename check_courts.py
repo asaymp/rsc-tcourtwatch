@@ -143,21 +143,32 @@ def main():
 
     all_available = []
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
         )
         page = context.new_page()
+        stealth_sync(page)
 
         # 1. Open login page and wait past any Vercel security checkpoint
-        page.goto(f"{BASE_URL}/", wait_until="networkidle")
-        page.wait_for_selector("input[name='email']", timeout=20000)
+        page.goto(f"{BASE_URL}/", wait_until="domcontentloaded")
+        try:
+            email_box = page.locator("input[name='email'], input[id='email'], input[type='text']").first
+            email_box.wait_for(state="visible", timeout=25000)
+        except Exception:
+            print("Timed out! Current page title:", page.title())
+            print("Page snippet:", page.inner_text("body")[:300])
+            raise
 
         # 2. Log in
-        page.fill("input[name='email']", CLUB_EMAIL)
-        page.fill("input[name='password']", CLUB_PASSWORD)
-        page.click("button[type='submit'], input[type='submit']")
+        email_box.fill(CLUB_EMAIL)
+        page.locator("input[name='password'], input[type='password']").first.fill(CLUB_PASSWORD)
+        page.locator("button[type='submit'], input[type='submit'], #loginButton").first.click()
         page.wait_for_load_state("networkidle")
         print("Logged into Rideau Sports Centre via browser.")
 
