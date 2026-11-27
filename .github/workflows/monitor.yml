@@ -1,13 +1,11 @@
+yaml
 name: Tennis Court Monitor
 
 on:
-  # Allows you to run it manually from the Actions tab to test it
   workflow_dispatch:
-  # Runs every 5 minutes
   schedule:
     - cron: '*/5 * * * *'
 
-# Gives the script permission to update the seen_courts.json memory file
 permissions:
   contents: write
 
@@ -25,11 +23,13 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests beautifulsoup4
 
       - name: Run court checker script
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          CLUB_EMAIL: ${{ secrets.CLUB_EMAIL }}
+          CLUB_PASSWORD: ${{ secrets.CLUB_PASSWORD }}
         run: python check_courts.py
 
       - name: Save memory file (prevent duplicate alerts)
