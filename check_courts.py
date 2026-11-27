@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
 
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 CLUB_EMAIL = os.environ.get("CLUB_EMAIL")
@@ -152,8 +151,8 @@ def main():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800},
         )
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = context.new_page()
-        stealth_sync(page)
 
         # 1. Open login page and wait past any Vercel security checkpoint
         page.goto(f"{BASE_URL}/", wait_until="domcontentloaded")
@@ -226,6 +225,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 if __name__ == "__main__":
