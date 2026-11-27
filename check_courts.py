@@ -131,7 +131,6 @@ def main():
     ottawa_tz = ZoneInfo("America/Toronto")
     now_ottawa = datetime.now(ottawa_tz)
 
-    # Only launch browser if at least one of the next 3 days is Fri, Sat, or Sun
     target_days = [
         now_ottawa + timedelta(days=offset)
         for offset in range(3)
@@ -144,7 +143,7 @@ def main():
 
     all_available = []
 
-        with sync_playwright() as p:
+    with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"],
@@ -178,7 +177,6 @@ def main():
 
         for target_dt in target_days:
             date_str = target_dt.strftime("%m/%d/%Y")
-            # Trigger Club Automation's internal AJAX grid load for this exact date
             html = page.evaluate(
                 """async (dateStr) => {
                     const form = document.querySelector('#courtScheduleProperties');
@@ -224,6 +222,10 @@ def main():
         print("No new court openings since last check.")
 
     save_seen_courts(all_available)
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":
