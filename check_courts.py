@@ -159,6 +159,9 @@ def fetch_day_slots(session, target_dt, now_ottawa):
     all_tds = soup.find_all("td", id=re.compile(r"^court_\d+_row_\d{2}:\d{2}$"))
     drag_tds = [td for td in all_tds if "start_drag" in td.get("onmousedown", "")]
     print(f"[{day_label}] HTML length={len(resp.text)}, total cells={len(all_tds)}, bookable cells={len(drag_tds)}")
+    title = soup.title.string.strip() if soup.title and soup.title.string else "No title"
+    print(f"   Page title: {title} | Snippet: {soup.get_text(' ', strip=True)[:180]}")
+
 
     open_by_time = {}
     now_minutes = now_ottawa.hour * 60 + now_ottawa.minute
