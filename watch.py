@@ -173,6 +173,9 @@ def run_check():
     if "Login to your account" in login_resp.text:
         print(f"[{stamp}] ERROR: Login failed! Check .env credentials.")
         return
+    
+    print("Login status:", login_resp.status_code, "| Landed URL:", login_resp.url)
+    print("Login snippet:", BeautifulSoup(login_resp.text, "html.parser").get_text(" ", strip=True)[:150])
 
     all_available = []
     for target_dt in target_days:
@@ -185,6 +188,8 @@ def run_check():
             timeout=20,
         )
         init_soup = BeautifulSoup(init_resp.text, "html.parser")
+
+        print("Init status:", init_resp.status_code, "| Form found:", bool(init_soup.find("form", {"id": "courtScheduleProperties"})))
 
         # Automatically grab all form fields from #courtScheduleProperties
         payload = {}
