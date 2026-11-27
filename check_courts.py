@@ -1,4 +1,3 @@
-python
 import os
 import re
 import json
@@ -252,6 +251,11 @@ def main():
         print("No new court openings since last check.")
 
     save_seen_courts(all_available)
+
+
+if __name__ == "__main__":
+    main()
+
 
 
 if __name__ == "__main__":
